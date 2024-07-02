@@ -120,22 +120,21 @@ void MainLoop()
             {
                 g_Renderer->BeginFrame();
 
-                g_Renderer->AddRectFilled(Vec2{10.f, 10.f}, Vec2{10.f + 50.f, 10.f + 50.f}, D3DCOLOR_XRGB(255, 0, 0));
-                g_Renderer->AddRect(Vec2{100.f, 10.f}, Vec2{100.f + 50.f, 10.f + 50.f}, D3DCOLOR_XRGB(255, 255, 255));
-                g_Renderer->AddCircle(Vec2{250.f, 40.f}, 32.f, D3DCOLOR_XRGB(255, 255, 255));
-                g_Renderer->AddLine(Vec2{300.f, 40.f}, Vec2{450.f, 45.f}, D3DCOLOR_XRGB(255, 255, 255));
+                g_Renderer->AddRectFilled(Vec2{10.f, 10.f}, Vec2{10.f + 50.f, 10.f + 50.f}, Color(255, 0, 0));
+                g_Renderer->AddRect(Vec2{100.f, 10.f}, Vec2{100.f + 50.f, 10.f + 50.f}, Color(0, 0, 0), 2.f);
+                g_Renderer->AddCircle(Vec2{250.f, 40.f}, 32.f, Color(0, 255, 0));
+                g_Renderer->AddLine(Vec2{300.f, 40.f}, Vec2{450.f, 45.f}, Color(255, 255, 255));
 
-                g_Renderer->AddText(g_FontTahoma, L"This is a normal test text!", 5.f, 100.f,
-                                    D3DCOLOR_XRGB(255, 255, 255));
+                g_Renderer->AddText(g_FontTahoma, L"This is a normal test text!", 5.f, 100.f, Color(255, 255, 255));
 
-                g_Renderer->AddText(g_FontTahoma, L"This is a drop shadow test text!", 5.f, 120.f,
-                                    D3DCOLOR_XRGB(255, 255, 255), TEXT_FLAG_DROPSHADOW);
+                g_Renderer->AddText(g_FontTahoma, L"This is a drop shadow test text!", 5.f, 120.f, Color(255, 255, 255),
+                                    TEXT_FLAG_DROPSHADOW);
 
-                g_Renderer->AddText(g_FontTahoma, L"This is a outline test text!", 5.f, 140.f,
-                                    D3DCOLOR_XRGB(255, 255, 255), TEXT_FLAG_OUTLINE);
+                g_Renderer->AddText(g_FontTahoma, L"This is a outline test text!", 5.f, 140.f, Color(255, 255, 255),
+                                    TEXT_FLAG_OUTLINE);
 
                 g_Renderer->AddText(g_FontTahoma, L"This is a {#FF0000FF}color {#66FF0096}tags {#FFFFFFFF}test text!",
-                                    5.f, 160.f, D3DCOLOR_XRGB(255, 255, 255), TEXT_FLAG_COLORTAGS);
+                                    5.f, 160.f, Color(255, 255, 255), TEXT_FLAG_COLORTAGS);
 
                 g_Renderer->Render();
                 g_Renderer->EndFrame();

@@ -69,12 +69,13 @@ using FontPtr = std::shared_ptr<Font>;
 using FontHandle = size_t;
 
 using TopologyType = D3DPRIMITIVETYPE;
-using Color = D3DCOLOR;
 
 using Vec2 = DirectX::XMFLOAT2;
 using Vec3 = DirectX::XMFLOAT3;
 using Vec4 = DirectX::XMFLOAT4;
 
+static constexpr wchar_t g_charRangeMin = 0x20;
+static constexpr wchar_t g_charRangeMax = 0x250;
 static constexpr ULONG g_VertexDefinition = D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1;
 
 enum FontFlags : int32_t
@@ -98,6 +99,55 @@ enum TextFlags : int32_t
     TEXT_FLAG_OUTLINE = 1 << 5,
     TEXT_FLAG_COLORTAGS = 1 << 6,
     TEXT_FLAG_MAX
+};
+
+class Color
+{
+  public:
+    Color() = default;
+
+    Color(const uint32_t color) : _color(color)
+    {
+    }
+
+    Color(const float r, const float g, const float b, const float a = 1.f)
+    {
+        this->_color = ToHexColor(r, g, b, a);
+    }
+
+    Color(const int r, const int g, const int b, const int a = 255)
+    {
+        this->_color = ToHexColor(static_cast<float>(r) / 255.f, static_cast<float>(g) / 255.f,
+                                  static_cast<float>(b) / 255.f, static_cast<float>(a) / 255.f);
+    }
+
+    explicit operator uint32_t() const
+    {
+        return _color;
+    }
+
+    inline uint32_t ToHexColor() const
+    {
+        return _color;
+    }
+
+    inline void FromHexColor(uint32_t color)
+    {
+        this->_color = color;
+    }
+
+  private:
+    inline uint32_t ToHexColor(float r, float g, float b, float a) const
+    {
+        uint8_t aByte = static_cast<uint8_t>(a * 255.0f);
+        uint8_t rByte = static_cast<uint8_t>(r * 255.0f);
+        uint8_t gByte = static_cast<uint8_t>(g * 255.0f);
+        uint8_t bByte = static_cast<uint8_t>(b * 255.0f);
+
+        return (aByte << 24) | (rByte << 16) | (gByte << 8) | bByte;
+    }
+
+    uint32_t _color = 0xFF000000; // Default to opaque black
 };
 
 struct Vertex
@@ -178,6 +228,7 @@ class RenderList : public std::enable_shared_from_this<RenderList>
 
         case D3DPT_LINESTRIP:
         case D3DPT_TRIANGLESTRIP:
+            // add a new empty batch to force the end of the strip
             this->_batches.emplace_back(0, D3DPT_FORCE_DWORD, nullptr);
             break;
         }
@@ -207,6 +258,7 @@ class RenderList : public std::enable_shared_from_this<RenderList>
 
         case D3DPT_LINESTRIP:
         case D3DPT_TRIANGLESTRIP:
+            // add a new empty batch to force the end of the strip
             this->_batches.emplace_back(0, D3DPT_FORCE_DWORD, nullptr);
             break;
         }
@@ -238,7 +290,7 @@ class Font : public std::enable_shared_from_this<Font>
     Font(const RenderListPtr &renderList, IDirect3DDevice9 *d3dDevice, const std::wstring &fontFamily, long fontHeigth,
          uint32_t fontFlags = FONT_FLAG_NONE)
         : _renderList(renderList), _d3dDevice(d3dDevice), _fontFamily(fontFamily), _fontHeigth(fontHeigth),
-          _fontFlags(fontFlags), _charSpacing(0), _d3dTexture(nullptr), _textScale(1.f), _textureWidth(1024),
+          _fontFlags(fontFlags), _charSpacing(0), _fontTexture(nullptr), _textScale(1.f), _textureWidth(1024),
           _textureHeight(1024), _initialized(false)
     {
         this->Initialize();
@@ -251,7 +303,7 @@ class Font : public std::enable_shared_from_this<Font>
 
     inline void Release()
     {
-        detail::SafeRelease(&this->_d3dTexture);
+        detail::SafeRelease(&this->_fontTexture);
     }
 
     inline void OnLostDevice()
@@ -287,7 +339,7 @@ class Font : public std::enable_shared_from_this<Font>
         this->EstimateTextureSize(hdc);
 
         HRESULT hr = this->_d3dDevice->CreateTexture(this->_textureWidth, this->_textureHeight, 1, D3DUSAGE_DYNAMIC,
-                                                     D3DFMT_A4R4G4B4, D3DPOOL_DEFAULT, &this->_d3dTexture, nullptr);
+                                                     D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &this->_fontTexture, nullptr);
         if (FAILED(hr))
         {
             throw std::runtime_error("Font::ctor(): CreateTexture failed!");
@@ -322,31 +374,32 @@ class Font : public std::enable_shared_from_this<Font>
         }
 
         D3DLOCKED_RECT lockedRect;
-        this->_d3dTexture->LockRect(0, &lockedRect, nullptr, 0);
+        this->_fontTexture->LockRect(0, &lockedRect, nullptr, 0);
 
         uint8_t *dstRow = static_cast<uint8_t *>(lockedRect.pBits);
 
         for (long y = 0; y < this->_textureHeight; y++)
         {
-            uint16_t *dst = reinterpret_cast<uint16_t *>(dstRow);
+            uint32_t *dst = reinterpret_cast<uint32_t *>(dstRow);
 
             for (long x = 0; x < this->_textureWidth; x++)
             {
-                uint8_t alpha = ((bitmapBips[this->_textureWidth * y + x] & 0xff) >> 4);
+                uint8_t alpha = (bitmapBips[this->_textureWidth * y + x] & 0xff);
+
                 if (alpha > 0)
                 {
-                    *dst++ = ((alpha << 12) | 0x0fff);
+                    *dst++ = (alpha << 24) | 0x00FFFFFF;
                 }
                 else
                 {
-                    *dst++ = 0x0000;
+                    *dst++ = 0x00000000;
                 }
             }
 
             dstRow += lockedRect.Pitch;
         }
 
-        this->_d3dTexture->UnlockRect(0);
+        this->_fontTexture->UnlockRect(0);
 
         SelectObject(hdc, prevBitmap);
         SelectObject(hdc, prevGdiFont);
@@ -457,7 +510,8 @@ class Font : public std::enable_shared_from_this<Font>
                                           outlineColor, Vec2{tx1, ty1}}};
 
                     // Drop shadow vertices (slightly offset and darker)
-                    Color shadowColor = D3DCOLOR_ARGB((currentColor >> 24) & 0xff, 0x00, 0x00, 0x00);
+                    Color shadowColor = Color(0x00, 0x00, 0x00, (currentColor.ToHexColor() >> 24) & 0xff);
+
                     Vertex shadowV[] = {
                         {Vec4{pos.x + 1.0f, pos.y + 1.0f + h, 0.89f, 1.f}, shadowColor, Vec2{tx1, ty2}},
                         {Vec4{pos.x + 1.0f, pos.y + 1.0f, 0.89f, 1.f}, shadowColor, Vec2{tx1, ty1}},
@@ -469,14 +523,14 @@ class Font : public std::enable_shared_from_this<Font>
 
                     if (flags & TEXT_FLAG_OUTLINE)
                     {
-                        this->_renderList->AddVertices(outlineV, D3DPT_TRIANGLELIST, this->_d3dTexture);
+                        this->_renderList->AddVertices(outlineV, D3DPT_TRIANGLELIST, this->_fontTexture);
                     }
                     else if (flags & TEXT_FLAG_DROPSHADOW)
                     {
-                        this->_renderList->AddVertices(shadowV, D3DPT_TRIANGLELIST, this->_d3dTexture);
+                        this->_renderList->AddVertices(shadowV, D3DPT_TRIANGLELIST, this->_fontTexture);
                     }
 
-                    this->_renderList->AddVertices(v, D3DPT_TRIANGLELIST, this->_d3dTexture);
+                    this->_renderList->AddVertices(v, D3DPT_TRIANGLELIST, this->_fontTexture);
                 }
 
                 pos.x += w - (2.f * this->_charSpacing);
@@ -538,7 +592,7 @@ class Font : public std::enable_shared_from_this<Font>
         long x = this->_charSpacing;
         long y = 0;
 
-        for (wchar_t c = 32; c < 0xFFFF; c++)
+        for (wchar_t c = g_charRangeMin; c < g_charRangeMax; c++)
         {
             chr[0] = c;
 
@@ -568,8 +622,8 @@ class Font : public std::enable_shared_from_this<Font>
     inline void CreateGdiFont(HDC hdc, HGDIOBJ *gdiFont)
     {
         static const int pointsPerInch = 72;
-        int pixelsPerInch = GetDeviceCaps(hdc, LOGPIXELSY);
-        int pixelsHeight = -(this->_fontHeigth * pixelsPerInch / pointsPerInch);
+        int dpi = GetDeviceCaps(hdc, LOGPIXELSY);
+        int pixelsHeight = -MulDiv(this->_fontHeigth, dpi, pointsPerInch);
 
         DWORD bold = (this->_fontFlags & FONT_FLAG_BOLD) ? FW_BOLD : FW_NORMAL;
         DWORD italic = (this->_fontFlags & FONT_FLAG_ITALIC) ? TRUE : FALSE;
@@ -604,7 +658,7 @@ class Font : public std::enable_shared_from_this<Font>
         long y = 0;
 
         // cover basic latin till latin extended B
-        for (wchar_t c = 0x20; c < 0x250; c++)
+        for (wchar_t c = g_charRangeMin; c < g_charRangeMax; c++)
         {
             chr[0] = c;
 
@@ -621,7 +675,7 @@ class Font : public std::enable_shared_from_this<Font>
 
             if (y + size.cy > this->_textureHeight)
             {
-                return D3DERR_MOREDATA;
+                return E_NOT_SUFFICIENT_BUFFER;
             }
 
             if (!onlyMeasure)
@@ -691,7 +745,7 @@ class Font : public std::enable_shared_from_this<Font>
 
     RenderListPtr _renderList;
     IDirect3DDevice9 *_d3dDevice;
-    IDirect3DTexture9 *_d3dTexture;
+    IDirect3DTexture9 *_fontTexture;
     std::map<wchar_t, std::array<float, 4>> _charCoords;
     long _textureWidth;
     long _textureHeight;
@@ -774,7 +828,7 @@ class Renderer : public std::enable_shared_from_this<Renderer>
     }
 
     inline void AddText(const FontHandle fontId, const std::wstring &text, float x, float y, const Color color,
-                        uint32_t flags = FONT_FLAG_NONE, const Color outlineColor = D3DCOLOR_XRGB(0, 0, 0),
+                        uint32_t flags = FONT_FLAG_NONE, const Color outlineColor = Color(0, 0, 0),
                         float outlineThickness = 2.0f)
     {
         auto font = this->_fonts.find(fontId);
@@ -927,6 +981,11 @@ class Renderer : public std::enable_shared_from_this<Renderer>
   private:
     inline void AcquireStateBlock()
     {
+        D3DVIEWPORT9 vp = {};
+        detail::ThrowIfFailed(this->_d3dDevice->GetViewport(&vp));
+
+        this->_displaySize = {static_cast<float>(vp.Width), static_cast<float>(vp.Height)};
+
         detail::ThrowIfFailed(this->_d3dDevice->CreateVertexBuffer(
             this->_maxVertices * sizeof(Vertex), D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, g_VertexDefinition,
             D3DPOOL_DEFAULT, &this->_d3dVertexBuffer, nullptr));
@@ -989,6 +1048,7 @@ class Renderer : public std::enable_shared_from_this<Renderer>
         }
     }
 
+    Vec2 _displaySize;
     IDirect3DDevice9 *_d3dDevice;
     IDirect3DVertexBuffer9 *_d3dVertexBuffer;
 

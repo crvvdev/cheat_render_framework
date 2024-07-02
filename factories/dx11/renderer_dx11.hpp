@@ -51,6 +51,9 @@ using Vec2 = DirectX::XMFLOAT2;
 using Vec3 = DirectX::XMFLOAT3;
 using Vec4 = DirectX::XMFLOAT4;
 
+static constexpr wchar_t g_charRangeMin = 0x20;
+static constexpr wchar_t g_charRangeMax = 0x250;
+
 static constexpr const char g_vertexShader[] = "cbuffer vertexBuffer : register(b0) \
             {\
               float4x4 ProjectionMatrix; \
@@ -159,10 +162,10 @@ class Color
         uint8_t gByte = static_cast<uint8_t>(g * 255.0f);
         uint8_t bByte = static_cast<uint8_t>(b * 255.0f);
 
-        return (aByte << 24) | (rByte << 16) | (gByte << 8) | bByte;
+        return (aByte << 24) | (bByte << 16) | (gByte << 8) | rByte;
     }
 
-    uint32_t _color = 0xFF000000; // Default to opaque black
+    uint32_t _color = 0xFF000000;
 };
 
 struct Vertex
@@ -194,7 +197,7 @@ struct Batch
     }
 
     std::size_t count = 0;
-    TopologyType topology = static_cast<TopologyType>(0);
+    TopologyType topology = TopologyType::D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
     ID3D11ShaderResourceView *texture = nullptr;
 };
 
@@ -207,29 +210,9 @@ class RenderList : public std::enable_shared_from_this<RenderList>
         this->_vertices.reserve(maxVertices);
     }
 
-    inline void AddVertex(Vertex &vertex, D3D11_PRIMITIVE_TOPOLOGY topology)
-    {
-        assert(topology != D3D11_PRIMITIVE_TOPOLOGY_LINESTRIP &&
-               "addVertex >Use addVertices to draw line/triangle strips!");
-        assert(topology != D3D11_PRIMITIVE_TOPOLOGY_LINESTRIP_ADJ &&
-               "addVertex >Use addVertices to draw line/triangle strips!");
-        assert(topology != D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP &&
-               "addVertex >Use addVertices to draw line/triangle strips!");
-        assert(topology != D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP_ADJ &&
-               "addVertex >Use addVertices to draw line/triangle strips!");
-
-        if (this->_batches.empty() || this->_batches.back().topology != topology)
-        {
-            this->_batches.emplace_back(0, topology);
-        }
-
-        this->_batches.back().count += 1;
-        this->_vertices.push_back(vertex);
-    }
-
     template <size_t N>
     inline void AddVertices(const Vertex (&vertexArray)[N], const TopologyType topology,
-                            ID3D11ShaderResourceView *texture = nullptr)
+                            ID3D11ShaderResourceView *texture)
     {
         const size_t numVertices = this->_vertices.size();
 
@@ -253,13 +236,14 @@ class RenderList : public std::enable_shared_from_this<RenderList>
         case D3D11_PRIMITIVE_TOPOLOGY_LINESTRIP_ADJ:
         case D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP:
         case D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP_ADJ:
+            // add a new empty batch to force the end of the strip
             this->_batches.emplace_back(0, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST, nullptr);
             break;
         }
     }
 
     inline void AddVertices(Vertex *vertexArray, size_t vertexArrayCount, const TopologyType topology,
-                            ID3D11ShaderResourceView *texture = nullptr)
+                            ID3D11ShaderResourceView *texture)
     {
         const size_t numVertices = this->_vertices.size();
 
@@ -284,6 +268,7 @@ class RenderList : public std::enable_shared_from_this<RenderList>
         case D3D11_PRIMITIVE_TOPOLOGY_LINESTRIP_ADJ:
         case D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP:
         case D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP_ADJ:
+            // add a new empty batch to force the end of the strip
             this->_batches.emplace_back(0, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST, nullptr);
             break;
         }
@@ -370,7 +355,7 @@ class Font : public std::enable_shared_from_this<Font>
         texDesc.Height = this->_textureHeight;
         texDesc.MipLevels = 1;
         texDesc.ArraySize = 1;
-        texDesc.Format = DXGI_FORMAT_B4G4R4A4_UNORM;
+        texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
         texDesc.SampleDesc.Count = 1;
         texDesc.Usage = D3D11_USAGE_DYNAMIC;
         texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
@@ -431,19 +416,12 @@ class Font : public std::enable_shared_from_this<Font>
 
         for (long y = 0; y < this->_textureHeight; y++)
         {
-            uint16_t *dst = reinterpret_cast<uint16_t *>(dstRow);
+            uint32_t *dst = reinterpret_cast<uint32_t *>(dstRow);
 
             for (long x = 0; x < this->_textureWidth; x++)
             {
-                uint8_t alpha = ((bitmapBips[this->_textureWidth * y + x] & 0xff) >> 4);
-                if (alpha > 0)
-                {
-                    *dst++ = ((alpha << 12) | 0x0fff);
-                }
-                else
-                {
-                    *dst++ = 0x0000;
-                }
+                uint8_t alpha = bitmapBips[this->_textureWidth * y + x] & 0xff;
+                *dst++ = (alpha << 24) | 0x00FFFFFF;
             }
 
             dstRow += mappedResource.RowPitch;
@@ -641,7 +619,7 @@ class Font : public std::enable_shared_from_this<Font>
         long x = this->_charSpacing;
         long y = 0;
 
-        for (wchar_t c = 32; c < 0xFFFF; c++)
+        for (wchar_t c = g_charRangeMin; c < g_charRangeMax; c++)
         {
             chr[0] = c;
 
@@ -671,8 +649,8 @@ class Font : public std::enable_shared_from_this<Font>
     inline void CreateGdiFont(HDC hdc, HGDIOBJ *gdiFont)
     {
         static const int pointsPerInch = 72;
-        int pixelsPerInch = GetDeviceCaps(hdc, LOGPIXELSY);
-        int pixelsHeight = -(this->_fontHeigth * pixelsPerInch / pointsPerInch);
+        int dpi = GetDeviceCaps(hdc, LOGPIXELSY);
+        int pixelsHeight = -MulDiv(this->_fontHeigth, dpi, pointsPerInch);
 
         DWORD bold = (this->_fontFlags & FONT_FLAG_BOLD) ? FW_BOLD : FW_NORMAL;
         DWORD italic = (this->_fontFlags & FONT_FLAG_ITALIC) ? TRUE : FALSE;
@@ -706,8 +684,7 @@ class Font : public std::enable_shared_from_this<Font>
         long x = this->_charSpacing;
         long y = 0;
 
-        // cover basic latin till latin extended B
-        for (wchar_t c = 0x20; c < 0x250; c++)
+        for (wchar_t c = g_charRangeMin; c < g_charRangeMax; c++)
         {
             chr[0] = c;
 
@@ -918,19 +895,22 @@ class Renderer : public std::enable_shared_from_this<Renderer>
         // Create font sampler
         {
             D3D11_SAMPLER_DESC desc{};
-            desc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
-            desc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
-            desc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
-            desc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+            desc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+            desc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+            desc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+            desc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
             desc.ComparisonFunc = D3D11_COMPARISON_NEVER;
+            desc.MinLOD = 0;
+            desc.MaxLOD = D3D11_FLOAT32_MAX;
 
             detail::ThrowIfFailed(this->_d3dDevice->CreateSamplerState(&desc, &this->_fontSampler));
         }
 
-        // Create texture
+        // We need to bind a texture because of texture sampling in shader, some implementations lack this functionality
+        // because it probably uses an already binded texture from whatever was rendering before!?
         {
-            const UINT textureWidth = 16;
-            const UINT textureHeight = 16;
+            const UINT textureWidth = 128;
+            const UINT textureHeight = 128;
 
             uint8_t whiteTexData[textureWidth * textureHeight * 4];
             memset(whiteTexData, 255, sizeof(whiteTexData));
@@ -941,7 +921,7 @@ class Renderer : public std::enable_shared_from_this<Renderer>
             texDesc.Height = textureHeight;
             texDesc.MipLevels = 1;
             texDesc.ArraySize = 1;
-            texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; // RGBA format
+            texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
             texDesc.SampleDesc.Count = 1;
             texDesc.Usage = D3D11_USAGE_DEFAULT;
             texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
@@ -950,12 +930,12 @@ class Renderer : public std::enable_shared_from_this<Renderer>
 
             D3D11_SUBRESOURCE_DATA initData = {};
             initData.pSysMem = whiteTexData;
-            initData.SysMemPitch = textureWidth * 4; // 4 bytes per pixel
+            initData.SysMemPitch = textureWidth * 4;
 
             detail::ThrowIfFailed(this->_d3dDevice->CreateTexture2D(&texDesc, &initData, &texture));
 
-            // Create shader resource view (SRV)
-            D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+            // Create renderer shader resource view
+            D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
             srvDesc.Format = texDesc.Format;
             srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
             srvDesc.Texture2D.MostDetailedMip = 0;
@@ -1029,8 +1009,7 @@ class Renderer : public std::enable_shared_from_this<Renderer>
     {
         this->AcquireStateBlock();
 
-        D3D11_VIEWPORT vp;
-        memset(&vp, 0, sizeof(D3D11_VIEWPORT));
+        D3D11_VIEWPORT vp{};
         vp.Width = this->_displaySize.x;
         vp.Height = this->_displaySize.y;
         vp.MinDepth = 0.0f;
@@ -1051,7 +1030,7 @@ class Renderer : public std::enable_shared_from_this<Renderer>
         const float blendFactor[4] = {0.f, 0.f, 0.f, 0.f};
         this->_d3dDeviceContext->OMSetBlendState(this->_blendState, blendFactor, 0xffffffff);
         this->_d3dDeviceContext->OMSetDepthStencilState(this->_depthStencilState, 0);
-        // this->_d3dDeviceContext->RSSetState(this->_rasterizerState);
+        this->_d3dDeviceContext->RSSetState(this->_rasterizerState);
     }
 
     inline void EndFrame()
@@ -1177,10 +1156,19 @@ class Renderer : public std::enable_shared_from_this<Renderer>
             this->_d3dDeviceContext->Unmap(this->_vertexBuffer, 0);
         }
 
+        D3D11_RECT scissorRect{};
+        scissorRect.left = 0;
+        scissorRect.top = 0;
+        scissorRect.right = static_cast<LONG>(this->_displaySize.x);
+        scissorRect.bottom = static_cast<LONG>(this->_displaySize.y);
+
         size_t pos = 0;
 
         for (const auto &batch : renderList->_batches)
         {
+            // this is needed for the rasterizer state
+            this->_d3dDeviceContext->RSSetScissorRects(1, &scissorRect);
+
             this->_d3dDeviceContext->PSSetShaderResources(0, 1, &batch.texture);
             this->_d3dDeviceContext->IASetPrimitiveTopology(batch.topology);
             this->_d3dDeviceContext->Draw(static_cast<uint32_t>(batch.count), static_cast<uint32_t>(pos));
@@ -1200,7 +1188,8 @@ class Renderer : public std::enable_shared_from_this<Renderer>
         return shared_from_this();
     }
 
-  private:
+  protected:
+    // this was referenced from ImGUI implementation.
     struct BACKUP_DX11_STATE
     {
         UINT ScissorRectsCount, ViewportsCount;
@@ -1227,79 +1216,83 @@ class Renderer : public std::enable_shared_from_this<Renderer>
         ID3D11InputLayout *InputLayout;
     };
 
-    BACKUP_DX11_STATE backupState = {};
+    BACKUP_DX11_STATE _backupState = {};
 
     inline void AcquireStateBlock()
     {
-        backupState.ScissorRectsCount = backupState.ViewportsCount =
+        _backupState.ScissorRectsCount = _backupState.ViewportsCount =
             D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
-        this->_d3dDeviceContext->RSGetScissorRects(&backupState.ScissorRectsCount, backupState.ScissorRects);
-        this->_d3dDeviceContext->RSGetViewports(&backupState.ViewportsCount, backupState.Viewports);
-        this->_d3dDeviceContext->RSGetState(&backupState.RS);
-        this->_d3dDeviceContext->OMGetBlendState(&backupState.BlendState, backupState.BlendFactor,
-                                                 &backupState.SampleMask);
-        this->_d3dDeviceContext->OMGetDepthStencilState(&backupState.DepthStencilState, &backupState.StencilRef);
-        this->_d3dDeviceContext->PSGetShaderResources(0, 1, &backupState.PSShaderResource);
-        this->_d3dDeviceContext->PSGetSamplers(0, 1, &backupState.PSSampler);
-        backupState.PSInstancesCount = backupState.VSInstancesCount = backupState.GSInstancesCount = 256;
-        this->_d3dDeviceContext->PSGetShader(&backupState.PS, backupState.PSInstances, &backupState.PSInstancesCount);
-        this->_d3dDeviceContext->VSGetShader(&backupState.VS, backupState.VSInstances, &backupState.VSInstancesCount);
-        this->_d3dDeviceContext->VSGetConstantBuffers(0, 1, &backupState.VSConstantBuffer);
-        this->_d3dDeviceContext->GSGetShader(&backupState.GS, backupState.GSInstances, &backupState.GSInstancesCount);
+        this->_d3dDeviceContext->RSGetScissorRects(&_backupState.ScissorRectsCount, _backupState.ScissorRects);
+        this->_d3dDeviceContext->RSGetViewports(&_backupState.ViewportsCount, _backupState.Viewports);
+        this->_d3dDeviceContext->RSGetState(&_backupState.RS);
+        this->_d3dDeviceContext->OMGetBlendState(&_backupState.BlendState, _backupState.BlendFactor,
+                                                 &_backupState.SampleMask);
+        this->_d3dDeviceContext->OMGetDepthStencilState(&_backupState.DepthStencilState, &_backupState.StencilRef);
+        this->_d3dDeviceContext->PSGetShaderResources(0, 1, &_backupState.PSShaderResource);
+        this->_d3dDeviceContext->PSGetSamplers(0, 1, &_backupState.PSSampler);
+        _backupState.PSInstancesCount = _backupState.VSInstancesCount = _backupState.GSInstancesCount = 256;
+        this->_d3dDeviceContext->PSGetShader(&_backupState.PS, _backupState.PSInstances,
+                                             &_backupState.PSInstancesCount);
+        this->_d3dDeviceContext->VSGetShader(&_backupState.VS, _backupState.VSInstances,
+                                             &_backupState.VSInstancesCount);
+        this->_d3dDeviceContext->VSGetConstantBuffers(0, 1, &_backupState.VSConstantBuffer);
+        this->_d3dDeviceContext->GSGetShader(&_backupState.GS, _backupState.GSInstances,
+                                             &_backupState.GSInstancesCount);
     }
 
     inline void RestoreStateBlock()
     {
-        this->_d3dDeviceContext->RSSetScissorRects(backupState.ScissorRectsCount, backupState.ScissorRects);
-        this->_d3dDeviceContext->RSSetViewports(backupState.ViewportsCount, backupState.Viewports);
-        this->_d3dDeviceContext->RSSetState(backupState.RS);
-        if (backupState.RS)
-            backupState.RS->Release();
-        this->_d3dDeviceContext->OMSetBlendState(backupState.BlendState, backupState.BlendFactor,
-                                                 backupState.SampleMask);
-        if (backupState.BlendState)
-            backupState.BlendState->Release();
-        this->_d3dDeviceContext->OMSetDepthStencilState(backupState.DepthStencilState, backupState.StencilRef);
-        if (backupState.DepthStencilState)
-            backupState.DepthStencilState->Release();
-        this->_d3dDeviceContext->PSSetShaderResources(0, 1, &backupState.PSShaderResource);
-        if (backupState.PSShaderResource)
-            backupState.PSShaderResource->Release();
-        this->_d3dDeviceContext->PSSetSamplers(0, 1, &backupState.PSSampler);
-        if (backupState.PSSampler)
-            backupState.PSSampler->Release();
-        this->_d3dDeviceContext->PSSetShader(backupState.PS, backupState.PSInstances, backupState.PSInstancesCount);
-        if (backupState.PS)
-            backupState.PS->Release();
-        for (UINT i = 0; i < backupState.PSInstancesCount; i++)
-            if (backupState.PSInstances[i])
-                backupState.PSInstances[i]->Release();
-        this->_d3dDeviceContext->VSSetShader(backupState.VS, backupState.VSInstances, backupState.VSInstancesCount);
-        if (backupState.VS)
-            backupState.VS->Release();
-        this->_d3dDeviceContext->VSSetConstantBuffers(0, 1, &backupState.VSConstantBuffer);
-        if (backupState.VSConstantBuffer)
-            backupState.VSConstantBuffer->Release();
-        this->_d3dDeviceContext->GSSetShader(backupState.GS, backupState.GSInstances, backupState.GSInstancesCount);
-        if (backupState.GS)
-            backupState.GS->Release();
-        for (UINT i = 0; i < backupState.VSInstancesCount; i++)
-            if (backupState.VSInstances[i])
-                backupState.VSInstances[i]->Release();
-        this->_d3dDeviceContext->IASetPrimitiveTopology(backupState.PrimitiveTopology);
-        this->_d3dDeviceContext->IASetIndexBuffer(backupState.IndexBuffer, backupState.IndexBufferFormat,
-                                                  backupState.IndexBufferOffset);
-        if (backupState.IndexBuffer)
-            backupState.IndexBuffer->Release();
-        this->_d3dDeviceContext->IASetVertexBuffers(0, 1, &backupState.VertexBuffer, &backupState.VertexBufferStride,
-                                                    &backupState.VertexBufferOffset);
-        if (backupState.VertexBuffer)
-            backupState.VertexBuffer->Release();
-        this->_d3dDeviceContext->IASetInputLayout(backupState.InputLayout);
-        if (backupState.InputLayout)
-            backupState.InputLayout->Release();
+        this->_d3dDeviceContext->RSSetScissorRects(_backupState.ScissorRectsCount, _backupState.ScissorRects);
+        this->_d3dDeviceContext->RSSetViewports(_backupState.ViewportsCount, _backupState.Viewports);
+        this->_d3dDeviceContext->RSSetState(_backupState.RS);
+        if (_backupState.RS)
+            _backupState.RS->Release();
+        this->_d3dDeviceContext->OMSetBlendState(_backupState.BlendState, _backupState.BlendFactor,
+                                                 _backupState.SampleMask);
+        if (_backupState.BlendState)
+            _backupState.BlendState->Release();
+        this->_d3dDeviceContext->OMSetDepthStencilState(_backupState.DepthStencilState, _backupState.StencilRef);
+        if (_backupState.DepthStencilState)
+            _backupState.DepthStencilState->Release();
+        this->_d3dDeviceContext->PSSetShaderResources(0, 1, &_backupState.PSShaderResource);
+        if (_backupState.PSShaderResource)
+            _backupState.PSShaderResource->Release();
+        this->_d3dDeviceContext->PSSetSamplers(0, 1, &_backupState.PSSampler);
+        if (_backupState.PSSampler)
+            _backupState.PSSampler->Release();
+        this->_d3dDeviceContext->PSSetShader(_backupState.PS, _backupState.PSInstances, _backupState.PSInstancesCount);
+        if (_backupState.PS)
+            _backupState.PS->Release();
+        for (UINT i = 0; i < _backupState.PSInstancesCount; i++)
+            if (_backupState.PSInstances[i])
+                _backupState.PSInstances[i]->Release();
+        this->_d3dDeviceContext->VSSetShader(_backupState.VS, _backupState.VSInstances, _backupState.VSInstancesCount);
+        if (_backupState.VS)
+            _backupState.VS->Release();
+        this->_d3dDeviceContext->VSSetConstantBuffers(0, 1, &_backupState.VSConstantBuffer);
+        if (_backupState.VSConstantBuffer)
+            _backupState.VSConstantBuffer->Release();
+        this->_d3dDeviceContext->GSSetShader(_backupState.GS, _backupState.GSInstances, _backupState.GSInstancesCount);
+        if (_backupState.GS)
+            _backupState.GS->Release();
+        for (UINT i = 0; i < _backupState.VSInstancesCount; i++)
+            if (_backupState.VSInstances[i])
+                _backupState.VSInstances[i]->Release();
+        this->_d3dDeviceContext->IASetPrimitiveTopology(_backupState.PrimitiveTopology);
+        this->_d3dDeviceContext->IASetIndexBuffer(_backupState.IndexBuffer, _backupState.IndexBufferFormat,
+                                                  _backupState.IndexBufferOffset);
+        if (_backupState.IndexBuffer)
+            _backupState.IndexBuffer->Release();
+        this->_d3dDeviceContext->IASetVertexBuffers(0, 1, &_backupState.VertexBuffer, &_backupState.VertexBufferStride,
+                                                    &_backupState.VertexBufferOffset);
+        if (_backupState.VertexBuffer)
+            _backupState.VertexBuffer->Release();
+        this->_d3dDeviceContext->IASetInputLayout(_backupState.InputLayout);
+        if (_backupState.InputLayout)
+            _backupState.InputLayout->Release();
     }
 
+  private:
     Vec2 _displaySize;
     ID3D11ShaderResourceView *_renderResourceView = nullptr;
     ID3D11DeviceContext *_d3dDeviceContext;
