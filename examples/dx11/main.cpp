@@ -66,7 +66,12 @@ void InitD3D(HWND hWnd)
         throw std::runtime_error("g_pSwapChain->GetBuffer failed");
     }
 
-    hr = g_pd3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, &g_pRenderTargetView);
+    D3D11_RENDER_TARGET_VIEW_DESC desc = {};
+    memset(&desc, 0, sizeof(desc));
+    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    desc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+
+    hr = g_pd3dDevice->CreateRenderTargetView(pBackBuffer, &desc, &g_pRenderTargetView);
     pBackBuffer->Release();
     if (FAILED(hr))
     {
@@ -140,7 +145,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     try
     {
         g_Renderer = std::make_shared<Renderer>(g_pd3dDevice, 4096);
-        g_FontTahoma = g_Renderer->AddFont(L"Tahoma", 15, FONT_FLAG_CLEAR_TYPE);
+        g_FontTahoma = g_Renderer->AddFont(L"Tahoma", 15);
     }
     catch (const std::runtime_error &e)
     {
@@ -157,11 +162,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
         else
         {
-            float clearColor[4] = {0.0f, 0.2f, 0.4f, 1.0f};
-            g_pd3dDeviceContext->ClearRenderTargetView(g_pRenderTargetView, clearColor);
-
             // Rendering code goes here
             g_Renderer->BeginFrame();
+
+            g_Renderer->AddRectFilled(Vec2{10.f, 10.f}, Vec2{10.f + 50.f, 10.f + 50.f}, Color(0, 0, 255));
+            g_Renderer->AddRect(Vec2{100.f, 10.f}, Vec2{100.f + 50.f, 10.f + 50.f}, Color(255, 255, 255));
+            g_Renderer->AddCircle(Vec2{250.f, 40.f}, 32.f, Color(0, 255, 255));
+            g_Renderer->AddLine(Vec2{300.f, 40.f}, Vec2{450.f, 45.f}, Color(0, 255, 255));
 
             g_Renderer->AddText(g_FontTahoma, L"This is a normal test text!", 5.f, 100.f, Color(255, 255, 255));
 
@@ -174,12 +181,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             g_Renderer->AddText(g_FontTahoma, L"This is a {#FF0000FF}color {#66FF0096}tags {#FFFFFFFF}test text!", 5.f,
                                 160.f, Color(255, 255, 255), TEXT_FLAG_COLORTAGS);
 
-            g_Renderer->AddRectFilled(Vec2{10.f, 10.f}, Vec2{10.f + 50.f, 10.f + 50.f}, Color(255, 255, 255));
-            g_Renderer->AddRect(Vec2{100.f, 10.f}, Vec2{100.f + 50.f, 10.f + 50.f}, Color(255, 255, 255));
-            g_Renderer->AddCircle(Vec2{250.f, 40.f}, 32.f, Color(255, 255, 255));
-            g_Renderer->AddLine(Vec2{300.f, 40.f}, Vec2{450.f, 45.f}, Color(255, 255, 255));
+            g_pd3dDeviceContext->OMSetRenderTargets(1, &g_pRenderTargetView, nullptr);
+            float clearColor[4] = {0.0f, 0.2f, 0.4f, 1.0f};
+            g_pd3dDeviceContext->ClearRenderTargetView(g_pRenderTargetView, clearColor);
 
             g_Renderer->Render();
+
             g_Renderer->EndFrame();
 
             // Present the frame

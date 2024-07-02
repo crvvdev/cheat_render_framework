@@ -244,7 +244,7 @@ class RenderList : public std::enable_shared_from_this<RenderList>
 
         memcpy(&this->_vertices[this->_vertices.size() - N], &vertexArray[0], N * sizeof(Vertex));
 
-        /*switch (topology)
+        switch (topology)
         {
         default:
             break;
@@ -253,10 +253,9 @@ class RenderList : public std::enable_shared_from_this<RenderList>
         case D3D11_PRIMITIVE_TOPOLOGY_LINESTRIP_ADJ:
         case D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP:
         case D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP_ADJ:
-            Vertex seperator{};
-            this->AddVertex(seperator, D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED);
+            this->_batches.emplace_back(0, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST, nullptr);
             break;
-        }*/
+        }
     }
 
     inline void AddVertices(Vertex *vertexArray, size_t vertexArrayCount, const TopologyType topology,
@@ -276,7 +275,7 @@ class RenderList : public std::enable_shared_from_this<RenderList>
         memcpy(&this->_vertices[this->_vertices.size() - vertexArrayCount], vertexArray,
                vertexArrayCount * sizeof(Vertex));
 
-        /*switch (topology)
+        switch (topology)
         {
         default:
             break;
@@ -285,10 +284,9 @@ class RenderList : public std::enable_shared_from_this<RenderList>
         case D3D11_PRIMITIVE_TOPOLOGY_LINESTRIP_ADJ:
         case D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP:
         case D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP_ADJ:
-            Vertex seperator{};
-            this->AddVertex(seperator, D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED);
+            this->_batches.emplace_back(0, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST, nullptr);
             break;
-        }*/
+        }
     }
 
     RenderListPtr MakePtr()
@@ -317,8 +315,8 @@ class Font : public std::enable_shared_from_this<Font>
     Font(const RenderListPtr &renderList, ID3D11Device *d3dDevice, const std::wstring &fontFamily, long fontHeigth,
          uint32_t fontFlags = FONT_FLAG_NONE)
         : _renderList(renderList), _d3dDevice(d3dDevice), _fontFamily(fontFamily), _fontHeigth(fontHeigth),
-          _fontFlags(fontFlags), _charSpacing(0), _d3dTexture(nullptr), _d3dTextureView(nullptr), _textScale(1.f),
-          _textureWidth(1024), _textureHeight(1024), _initialized(false)
+          _fontFlags(fontFlags), _charSpacing(0), _fontTextureView(nullptr), _textScale(1.f), _textureWidth(1024),
+          _textureHeight(1024), _initialized(false)
     {
         this->_d3dDevice->GetImmediateContext(&this->_d3dDeviceContext);
 
@@ -332,8 +330,7 @@ class Font : public std::enable_shared_from_this<Font>
 
     inline void Release()
     {
-        detail::SafeRelease(&this->_d3dTexture);
-        detail::SafeRelease(&this->_d3dTextureView);
+        detail::SafeRelease(&this->_fontTextureView);
     }
 
     inline void OnLostDevice()
@@ -379,7 +376,9 @@ class Font : public std::enable_shared_from_this<Font>
         texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
         texDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 
-        HRESULT hr = this->_d3dDevice->CreateTexture2D(&texDesc, nullptr, &this->_d3dTexture);
+        ID3D11Texture2D *texture = nullptr;
+
+        HRESULT hr = this->_d3dDevice->CreateTexture2D(&texDesc, nullptr, &texture);
         if (FAILED(hr))
         {
             throw std::runtime_error("Font::ctor(): CreateTexture failed!");
@@ -391,7 +390,7 @@ class Font : public std::enable_shared_from_this<Font>
         srvDesc.Texture2D.MostDetailedMip = 0;
         srvDesc.Texture2D.MipLevels = 1;
 
-        hr = this->_d3dDevice->CreateShaderResourceView(this->_d3dTexture, &srvDesc, &this->_d3dTextureView);
+        hr = this->_d3dDevice->CreateShaderResourceView(texture, &srvDesc, &this->_fontTextureView);
         if (FAILED(hr))
         {
             throw std::runtime_error("Font::ctor(): CreateShaderResourceView failed!");
@@ -426,7 +425,7 @@ class Font : public std::enable_shared_from_this<Font>
         }
 
         D3D11_MAPPED_SUBRESOURCE mappedResource;
-        this->_d3dDeviceContext->Map(this->_d3dTexture, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource);
+        this->_d3dDeviceContext->Map(texture, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource);
 
         uint8_t *dstRow = static_cast<uint8_t *>(mappedResource.pData);
 
@@ -450,7 +449,9 @@ class Font : public std::enable_shared_from_this<Font>
             dstRow += mappedResource.RowPitch;
         }
 
-        this->_d3dDeviceContext->Unmap(this->_d3dTexture, 0);
+        this->_d3dDeviceContext->Unmap(texture, 0);
+
+        detail::SafeRelease(&texture);
 
         SelectObject(hdc, prevBitmap);
         SelectObject(hdc, prevGdiFont);
@@ -557,29 +558,28 @@ class Font : public std::enable_shared_from_this<Font>
                         {Vec2{pos.x - outlineThickness, pos.y - outlineThickness}, outlineColor, Vec2{tx1, ty1}}};
 
                     // Drop shadow vertices (slightly offset and darker)
-                    /* Color shadowColor = Color((currentColor.ToHexColor() >> 24) & 0xff, 0x00, 0x00, 0x00);
+                    Color shadowColor = Color(0x00, 0x00, 0x00, (currentColor.ToHexColor() >> 24) & 0xff);
 
-                     Vertex shadowV[] = {
-                         {Vec4{pos.x + 1.0f, pos.y + 1.0f + h, 0.89f, 1.f}, shadowColor, Vec2{tx1, ty2}},
-                         {Vec4{pos.x + 1.0f, pos.y + 1.0f, 0.89f, 1.f}, shadowColor, Vec2{tx1, ty1}},
-                         {Vec4{pos.x + 1.0f + w, pos.y + 1.0f + h, 0.89f, 1.f}, shadowColor, Vec2{tx2, ty2}},
+                    Vertex shadowV[] = {{Vec2{pos.x + 1.0f, pos.y + 1.0f + h}, shadowColor, Vec2{tx1, ty2}},
+                                        {Vec2{pos.x + 1.0f, pos.y + 1.0f}, shadowColor, Vec2{tx1, ty1}},
+                                        {Vec2{pos.x + 1.0f + w, pos.y + 1.0f + h}, shadowColor, Vec2{tx2, ty2}},
 
-                         {Vec4{pos.x + 1.0f + w, pos.y + 1.0f, 0.89f, 1.f}, shadowColor, Vec2{tx2, ty1}},
-                         {Vec4{pos.x + 1.0f + w, pos.y + 1.0f + h, 0.89f, 1.f}, shadowColor, Vec2{tx2, ty2}},
-                         {Vec4{pos.x + 1.0f, pos.y + 1.0f, 0.89f, 1.f}, shadowColor, Vec2{tx1, ty1}}};*/
+                                        {Vec2{pos.x + 1.0f + w, pos.y + 1.0f}, shadowColor, Vec2{tx2, ty1}},
+                                        {Vec2{pos.x + 1.0f + w, pos.y + 1.0f + h}, shadowColor, Vec2{tx2, ty2}},
+                                        {Vec2{pos.x + 1.0f, pos.y + 1.0f}, shadowColor, Vec2{tx1, ty1}}};
 
                     if (flags & TEXT_FLAG_OUTLINE)
                     {
                         this->_renderList->AddVertices(outlineV, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
-                                                       this->_d3dTextureView);
+                                                       this->_fontTextureView);
                     }
                     else if (flags & TEXT_FLAG_DROPSHADOW)
                     {
-                        /* this->_renderList->AddVertices(shadowV, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
-                                                        this->_d3dTextureView);*/
+                        this->_renderList->AddVertices(shadowV, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+                                                       this->_fontTextureView);
                     }
 
-                    this->_renderList->AddVertices(v, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST, this->_d3dTextureView);
+                    this->_renderList->AddVertices(v, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST, this->_fontTextureView);
                 }
 
                 pos.x += w - (2.f * this->_charSpacing);
@@ -795,8 +795,7 @@ class Font : public std::enable_shared_from_this<Font>
     RenderListPtr _renderList;
     ID3D11Device *_d3dDevice;
     ID3D11DeviceContext *_d3dDeviceContext;
-    ID3D11Texture2D *_d3dTexture;
-    ID3D11ShaderResourceView *_d3dTextureView;
+    ID3D11ShaderResourceView *_fontTextureView;
     std::map<wchar_t, std::array<float, 4>> _charCoords;
     long _textureWidth;
     long _textureHeight;
@@ -814,7 +813,7 @@ class Renderer : public std::enable_shared_from_this<Renderer>
   public:
     Renderer(ID3D11Device *d3dDevice, uint32_t maxVertices)
         : _d3dDevice(d3dDevice), _d3dDeviceContext(nullptr), _inputLayout(nullptr), _blendState(nullptr),
-          _vertexShader(nullptr), _pixelShader(nullptr), _vertexBuffer(nullptr), _screenProjectionBuffer(nullptr),
+          _vertexShader(nullptr), _pixelShader(nullptr), _vertexBuffer(nullptr), _vertexConstantBuffer(nullptr),
           _maxVertices(maxVertices), _renderList(std::make_shared<RenderList>(maxVertices)), _nextFontId(1)
     {
         if (!d3dDevice)
@@ -822,29 +821,28 @@ class Renderer : public std::enable_shared_from_this<Renderer>
             throw std::exception("Renderer::ctor() d3dDevice is null!");
         }
 
-        D3D11_INPUT_ELEMENT_DESC layout[] = {
-            {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, (UINT)offsetof(Vertex, pos), D3D11_INPUT_PER_VERTEX_DATA, 0},
-            {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, (UINT)offsetof(Vertex, uv), D3D11_INPUT_PER_VERTEX_DATA, 0},
-            {"COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, (UINT)offsetof(Vertex, color), D3D11_INPUT_PER_VERTEX_DATA, 0},
-        };
-
         ID3DBlob *vsBlob = nullptr;
         ID3DBlob *psBlob = nullptr;
-        ID3DBlob *errorBlob = nullptr;
 
         this->_d3dDevice->GetImmediateContext(&this->_d3dDeviceContext);
 
         detail::ThrowIfFailed(D3DCompile(g_vertexShader, strlen(g_vertexShader), nullptr, nullptr, nullptr, "main",
-                                         "vs_4_0", 0, 0, &vsBlob, &errorBlob));
+                                         "vs_4_0", 0, 0, &vsBlob, nullptr));
 
         detail::ThrowIfFailed(D3DCompile(g_pixelShader, strlen(g_pixelShader), nullptr, nullptr, nullptr, "main",
-                                         "ps_4_0", 0, 0, &psBlob, &errorBlob));
+                                         "ps_4_0", 0, 0, &psBlob, nullptr));
 
         detail::ThrowIfFailed(this->_d3dDevice->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(),
                                                                    nullptr, &this->_vertexShader));
 
         detail::ThrowIfFailed(this->_d3dDevice->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(),
                                                                   nullptr, &this->_pixelShader));
+
+        D3D11_INPUT_ELEMENT_DESC layout[] = {
+            {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, (UINT)offsetof(Vertex, pos), D3D11_INPUT_PER_VERTEX_DATA, 0},
+            {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, (UINT)offsetof(Vertex, uv), D3D11_INPUT_PER_VERTEX_DATA, 0},
+            {"COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, (UINT)offsetof(Vertex, color), D3D11_INPUT_PER_VERTEX_DATA, 0},
+        };
 
         detail::ThrowIfFailed(this->_d3dDevice->CreateInputLayout(layout, ARRAYSIZE(layout), vsBlob->GetBufferPointer(),
                                                                   vsBlob->GetBufferSize(), &this->_inputLayout));
@@ -854,42 +852,33 @@ class Renderer : public std::enable_shared_from_this<Renderer>
 
         // Create the blender state
         {
-            D3D11_BLEND_DESC desc;
-            ZeroMemory(&desc, sizeof(desc));
-            desc.AlphaToCoverageEnable = false;
-            desc.RenderTarget[0].BlendEnable = true;
-            desc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
-            desc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-            desc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
-            desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
-            desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
-            desc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
-            desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+            D3D11_BLEND_DESC desc{};
+            desc.RenderTarget->BlendEnable = TRUE;
+            desc.RenderTarget->SrcBlend = D3D11_BLEND_SRC_ALPHA;
+            desc.RenderTarget->DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+            desc.RenderTarget->SrcBlendAlpha = D3D11_BLEND_ONE;
+            desc.RenderTarget->DestBlendAlpha = D3D11_BLEND_ZERO;
+            desc.RenderTarget->BlendOp = D3D11_BLEND_OP_ADD;
+            desc.RenderTarget->BlendOpAlpha = D3D11_BLEND_OP_ADD;
+            desc.RenderTarget->RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+
             detail::ThrowIfFailed(this->_d3dDevice->CreateBlendState(&desc, &this->_blendState));
         }
 
         // Create the rasterizer state
         {
-            D3D11_RASTERIZER_DESC desc;
-            ZeroMemory(&desc, sizeof(desc));
-            desc.AntialiasedLineEnable = false;
-            desc.CullMode = D3D11_CULL_BACK;
-            desc.DepthBias = 0;
-            desc.DepthBiasClamp = 0.0f;
-            desc.DepthClipEnable = true;
+            D3D11_RASTERIZER_DESC desc{};
             desc.FillMode = D3D11_FILL_SOLID;
-            desc.FrontCounterClockwise = false;
-            desc.MultisampleEnable = false;
-            desc.ScissorEnable = false;
-            desc.SlopeScaledDepthBias = 0.0f;
+            desc.CullMode = D3D11_CULL_NONE;
+            desc.ScissorEnable = true;
+            desc.DepthClipEnable = true;
 
             detail::ThrowIfFailed(this->_d3dDevice->CreateRasterizerState(&desc, &this->_rasterizerState));
         }
 
         // Create depth-stencil State
         {
-            D3D11_DEPTH_STENCIL_DESC desc;
-            ZeroMemory(&desc, sizeof(desc));
+            D3D11_DEPTH_STENCIL_DESC desc{};
             desc.DepthEnable = false;
             desc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
             desc.DepthFunc = D3D11_COMPARISON_ALWAYS;
@@ -914,7 +903,7 @@ class Renderer : public std::enable_shared_from_this<Renderer>
             detail::ThrowIfFailed(this->_d3dDevice->CreateBuffer(&desc, nullptr, &this->_vertexBuffer));
         }
 
-        // Create projection buffer
+        // Create vertex constant buffer
         {
             D3D11_BUFFER_DESC desc{};
             desc.Usage = D3D11_USAGE_DYNAMIC;
@@ -923,40 +912,81 @@ class Renderer : public std::enable_shared_from_this<Renderer>
             desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
             desc.MiscFlags = 0;
 
-            detail::ThrowIfFailed(this->_d3dDevice->CreateBuffer(&desc, nullptr, &this->_screenProjectionBuffer));
+            detail::ThrowIfFailed(this->_d3dDevice->CreateBuffer(&desc, nullptr, &this->_vertexConstantBuffer));
         }
 
         // Create font sampler
         {
             D3D11_SAMPLER_DESC desc{};
-            desc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+            desc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
             desc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
             desc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
             desc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
-            desc.MipLODBias = 0.f;
-            desc.ComparisonFunc = D3D11_COMPARISON_ALWAYS;
-            desc.MinLOD = 0.f;
-            desc.MaxLOD = 0.f;
+            desc.ComparisonFunc = D3D11_COMPARISON_NEVER;
 
             detail::ThrowIfFailed(this->_d3dDevice->CreateSamplerState(&desc, &this->_fontSampler));
         }
 
+        // Create texture
+        {
+            const UINT textureWidth = 16;
+            const UINT textureHeight = 16;
+
+            uint8_t whiteTexData[textureWidth * textureHeight * 4];
+            memset(whiteTexData, 255, sizeof(whiteTexData));
+
+            ID3D11Texture2D *texture = nullptr;
+            D3D11_TEXTURE2D_DESC texDesc = {};
+            texDesc.Width = textureWidth;
+            texDesc.Height = textureHeight;
+            texDesc.MipLevels = 1;
+            texDesc.ArraySize = 1;
+            texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; // RGBA format
+            texDesc.SampleDesc.Count = 1;
+            texDesc.Usage = D3D11_USAGE_DEFAULT;
+            texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+            texDesc.CPUAccessFlags = 0;
+            texDesc.MiscFlags = 0;
+
+            D3D11_SUBRESOURCE_DATA initData = {};
+            initData.pSysMem = whiteTexData;
+            initData.SysMemPitch = textureWidth * 4; // 4 bytes per pixel
+
+            detail::ThrowIfFailed(this->_d3dDevice->CreateTexture2D(&texDesc, &initData, &texture));
+
+            // Create shader resource view (SRV)
+            D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+            srvDesc.Format = texDesc.Format;
+            srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+            srvDesc.Texture2D.MostDetailedMip = 0;
+            srvDesc.Texture2D.MipLevels = 1;
+
+            detail::ThrowIfFailed(
+                this->_d3dDevice->CreateShaderResourceView(texture, &srvDesc, &this->_renderResourceView));
+
+            detail::SafeRelease(&texture);
+        }
+
+        // Get viewport to create orthographic projection matrix
         D3D11_VIEWPORT viewport{};
         UINT numViewports = 1;
 
         this->_d3dDeviceContext->RSGetViewports(&numViewports, &viewport);
 
+        this->_displaySize = {viewport.Width, viewport.Height};
+
         this->_projMatrix =
             DirectX::XMMatrixOrthographicOffCenterLH(viewport.TopLeftX, viewport.Width, viewport.Height,
                                                      viewport.TopLeftY, viewport.MinDepth, viewport.MaxDepth);
 
+        // Setup orthographic projection matrix into our constant buffer
         D3D11_MAPPED_SUBRESOURCE mappedResource;
-        detail::ThrowIfFailed(this->_d3dDeviceContext->Map(this->_screenProjectionBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0,
-                                                           &mappedResource));
+        detail::ThrowIfFailed(
+            this->_d3dDeviceContext->Map(this->_vertexConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource));
         {
             memcpy(mappedResource.pData, &this->_projMatrix, sizeof(DirectX::XMMATRIX));
         }
-        this->_d3dDeviceContext->Unmap(this->_screenProjectionBuffer, 0);
+        this->_d3dDeviceContext->Unmap(this->_vertexConstantBuffer, 0);
     }
 
     ~Renderer()
@@ -969,9 +999,12 @@ class Renderer : public std::enable_shared_from_this<Renderer>
         detail::SafeRelease(&this->_vertexShader);
         detail::SafeRelease(&this->_pixelShader);
         detail::SafeRelease(&this->_vertexBuffer);
-        detail::SafeRelease(&this->_screenProjectionBuffer);
+        detail::SafeRelease(&this->_vertexConstantBuffer);
         detail::SafeRelease(&this->_inputLayout);
+        detail::SafeRelease(&this->_fontSampler);
         detail::SafeRelease(&this->_blendState);
+        detail::SafeRelease(&this->_depthStencilState);
+        detail::SafeRelease(&this->_rasterizerState);
     }
 
     inline void OnLostDevice()
@@ -986,8 +1019,6 @@ class Renderer : public std::enable_shared_from_this<Renderer>
 
     inline void OnResetDevice()
     {
-        // this->AcquireStateBlock();
-
         for (auto &[_, font] : this->_fonts)
         {
             font->OnResetDevice();
@@ -998,21 +1029,29 @@ class Renderer : public std::enable_shared_from_this<Renderer>
     {
         this->AcquireStateBlock();
 
+        D3D11_VIEWPORT vp;
+        memset(&vp, 0, sizeof(D3D11_VIEWPORT));
+        vp.Width = this->_displaySize.x;
+        vp.Height = this->_displaySize.y;
+        vp.MinDepth = 0.0f;
+        vp.MaxDepth = 1.0f;
+        vp.TopLeftX = vp.TopLeftY = 0;
+        this->_d3dDeviceContext->RSSetViewports(1, &vp);
+
         UINT stride = sizeof(Vertex);
         UINT offset = 0;
 
         this->_d3dDeviceContext->IASetVertexBuffers(0, 1, &this->_vertexBuffer, &stride, &offset);
-
+        this->_d3dDeviceContext->VSSetConstantBuffers(0, 1, &this->_vertexConstantBuffer);
         this->_d3dDeviceContext->IASetInputLayout(this->_inputLayout);
         this->_d3dDeviceContext->VSSetShader(this->_vertexShader, nullptr, 0);
-        this->_d3dDeviceContext->VSSetConstantBuffers(0, 1, &this->_screenProjectionBuffer);
         this->_d3dDeviceContext->PSSetShader(this->_pixelShader, nullptr, 0);
         this->_d3dDeviceContext->PSSetSamplers(0, 1, &this->_fontSampler);
 
         const float blendFactor[4] = {0.f, 0.f, 0.f, 0.f};
         this->_d3dDeviceContext->OMSetBlendState(this->_blendState, blendFactor, 0xffffffff);
         this->_d3dDeviceContext->OMSetDepthStencilState(this->_depthStencilState, 0);
-        this->_d3dDeviceContext->RSSetState(this->_rasterizerState);
+        // this->_d3dDeviceContext->RSSetState(this->_rasterizerState);
     }
 
     inline void EndFrame()
@@ -1060,7 +1099,7 @@ class Renderer : public std::enable_shared_from_this<Renderer>
             {x1, y2, color}  // Bottom-left vertex
         };
 
-        renderList->AddVertices(v, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        renderList->AddVertices(v, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST, this->_renderResourceView);
     }
 
     inline void AddRectFilled(const Vec2 &min, const Vec2 &max, const Color color)
@@ -1095,7 +1134,7 @@ class Renderer : public std::enable_shared_from_this<Renderer>
     {
         Vertex v[]{{v1.x, v1.y, color}, {v2.x, v2.y, color}};
 
-        renderList->AddVertices(v, D3D11_PRIMITIVE_TOPOLOGY_LINELIST);
+        renderList->AddVertices(v, D3D11_PRIMITIVE_TOPOLOGY_LINELIST, this->_renderResourceView);
     }
 
     inline void AddLine(const Vec2 &v1, const Vec2 &v2, const Color color)
@@ -1115,7 +1154,7 @@ class Renderer : public std::enable_shared_from_this<Renderer>
             v[i] = Vertex{pos.x + radius * std::cos(theta), pos.y + radius * std::sin(theta), color};
         }
 
-        renderList->AddVertices(v.data(), v.size(), D3D11_PRIMITIVE_TOPOLOGY_LINESTRIP);
+        renderList->AddVertices(v.data(), v.size(), D3D11_PRIMITIVE_TOPOLOGY_LINESTRIP, this->_renderResourceView);
     }
 
     inline void AddCircle(const Vec2 &pos, float radius, const Color color, int segments = 24)
@@ -1261,6 +1300,8 @@ class Renderer : public std::enable_shared_from_this<Renderer>
             backupState.InputLayout->Release();
     }
 
+    Vec2 _displaySize;
+    ID3D11ShaderResourceView *_renderResourceView = nullptr;
     ID3D11DeviceContext *_d3dDeviceContext;
     ID3D11Device *_d3dDevice;
     ID3D11InputLayout *_inputLayout;
@@ -1268,7 +1309,7 @@ class Renderer : public std::enable_shared_from_this<Renderer>
     ID3D11VertexShader *_vertexShader;
     ID3D11PixelShader *_pixelShader;
     ID3D11Buffer *_vertexBuffer;
-    ID3D11Buffer *_screenProjectionBuffer;
+    ID3D11Buffer *_vertexConstantBuffer;
     ID3D11SamplerState *_fontSampler;
     ID3D11RasterizerState *_rasterizerState;
     ID3D11DepthStencilState *_depthStencilState;
