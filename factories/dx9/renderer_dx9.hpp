@@ -9,10 +9,7 @@
 #include <algorithm>
 
 #include <d3d9.h>
-#include <dwrite.h>
 #include <DirectXMath.h>
-
-#pragma comment(lib, "dwrite.lib")
 
 namespace CheatRenderFramework
 {
