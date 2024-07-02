@@ -264,11 +264,6 @@ class RenderList : public std::enable_shared_from_this<RenderList>
         }
     }
 
-    RenderListPtr MakePtr()
-    {
-        return shared_from_this();
-    }
-
     void Clear()
     {
         this->_vertices.clear();
@@ -566,11 +561,6 @@ class Font : public std::enable_shared_from_this<Font>
 
         width = max(width, rowWidth);
         return Vec2(width, height);
-    }
-
-    inline std::shared_ptr<Font> MakePtr()
-    {
-        return shared_from_this();
     }
 
     inline bool IsInitialized() const
@@ -973,9 +963,9 @@ class Renderer : public std::enable_shared_from_this<Renderer>
         _renderList->Clear();
     }
 
-    inline RendererPtr MakePtr()
+    inline RenderListPtr CreateRenderList()
     {
-        return shared_from_this();
+        return std::make_shared<RenderList>(this->_maxVertices);
     }
 
   private:
