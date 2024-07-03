@@ -1013,16 +1013,32 @@ class Renderer : public std::enable_shared_from_this<Renderer>
                              strokeWidth);
     }
 
-    inline void AddLine(const RenderListPtr &renderList, const Vec2 &v1, const Vec2 &v2, const Color color)
+    inline void AddLine(const RenderListPtr &renderList, const Vec2 &v1, const Vec2 &v2, const Color color,
+                        const float thickness = 1.f)
     {
-        Vertex v[]{{v1.x, v1.y, color}, {v2.x, v2.y, color}};
+        float dx = v2.x - v1.x;
+        float dy = v2.y - v1.y;
+        float length = std::sqrtf(dx * dx + dy * dy);
 
-        renderList->AddVertices(v, D3DPT_LINELIST);
+        dx /= length;
+        dy /= length;
+
+        float px = -dy * thickness * 0.5f;
+        float py = dx * thickness * 0.5f;
+
+        Vertex v[] = {
+            {{v1.x + px, v1.y + py, 0.0f, 1.0f}, color}, // Bottom-left
+            {{v1.x - px, v1.y - py, 0.0f, 1.0f}, color}, // Top-left
+            {{v2.x + px, v2.y + py, 0.0f, 1.0f}, color}, // Bottom-right
+            {{v2.x - px, v2.y - py, 0.0f, 1.0f}, color}  // Top-right
+        };
+
+        renderList->AddVertices(v, D3DPT_TRIANGLESTRIP);
     }
 
-    inline void AddLine(const Vec2 &v1, const Vec2 &v2, const Color color)
+    inline void AddLine(const Vec2 &v1, const Vec2 &v2, const Color color, const float thickness = 1.f)
     {
-        return this->AddLine(this->_renderList, v1, v2, color);
+        return this->AddLine(this->_renderList, v1, v2, color, thickness);
     }
 
     inline void AddCircle(const RenderListPtr &renderList, const Vec2 &pos, float radius, const Color color,
