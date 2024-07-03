@@ -45,12 +45,12 @@ __forceinline std::wstring ConvertToWString(const std::string &str)
 
 namespace util
 {
-bool IsTopologyList(const D3DPRIMITIVETYPE topology)
+__forceinline bool IsTopologyList(const D3DPRIMITIVETYPE topology)
 {
     return topology == D3DPT_POINTLIST || topology == D3DPT_LINELIST || topology == D3DPT_TRIANGLELIST;
 }
 
-int GetTopologyOrder(const D3DPRIMITIVETYPE topology)
+__forceinline int GetTopologyOrder(const D3DPRIMITIVETYPE topology)
 {
     switch (topology)
     {
