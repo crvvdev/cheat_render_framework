@@ -86,7 +86,7 @@ using Vec4 = DirectX::XMFLOAT4;
 
 static constexpr wchar_t g_charRangeMin = 0x20;
 static constexpr wchar_t g_charRangeMax = 0x250;
-static constexpr ULONG g_VertexDefinition = D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1;
+static constexpr ULONG g_vertexDefinition = D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1;
 
 enum FontFlags : int32_t
 {
@@ -109,6 +109,12 @@ enum TextFlags : int32_t
     TEXT_FLAG_OUTLINE = 1 << 5,
     TEXT_FLAG_COLORTAGS = 1 << 6,
     TEXT_FLAG_MAX
+};
+
+enum class GradientDirection : int32_t
+{
+    Horizontal = 0,
+    Vertical
 };
 
 class Color
@@ -882,6 +888,60 @@ class Renderer : public std::enable_shared_from_this<Renderer>
         return this->CalculateTextExtent(fontId, detail::ConvertToWString(text));
     }
 
+    inline void AddGradientRect(const RenderListPtr &renderList, const Vec2 &min, const Vec2 &max, const Color &color1,
+                                const Color &color2, const GradientDirection direction)
+    {
+        float x1 = min.x;
+        float y1 = min.y;
+        float x2 = max.x;
+        float y2 = max.y;
+
+        Vertex v[6];
+
+        if (direction == GradientDirection::Horizontal)
+        {
+            v[0] = {x1, y1, 0.5f, color1}; // Top-left
+            v[1] = {x2, y1, 0.5f, color1}; // Top-right
+            v[2] = {x1, y2, 0.5f, color2}; // Bottom-left
+
+            v[3] = {x2, y1, 0.5f, color1}; // Top-right
+            v[4] = {x2, y2, 0.5f, color2}; // Bottom-right
+            v[5] = {x1, y2, 0.5f, color2}; // Bottom-left
+        }
+        else
+        {
+            v[0] = {x1, y1, 0.5f, color1}; // Top-left
+            v[1] = {x2, y1, 0.5f, color2}; // Top-right
+            v[2] = {x1, y2, 0.5f, color1}; // Bottom-left
+
+            v[3] = {x2, y1, 0.5f, color2}; // Top-right
+            v[4] = {x2, y2, 0.5f, color2}; // Bottom-right
+            v[5] = {x1, y2, 0.5f, color1}; // Bottom-left
+        }
+
+        renderList->AddVertices(v, 6, D3DPT_TRIANGLELIST);
+    }
+
+    inline void AddGradientRect(const Vec2 &min, const Vec2 &max, const Color &color1, const Color &color2,
+                                const GradientDirection direction)
+    {
+        return this->AddGradientRect(this->_renderList, min, max, color1, color2, direction);
+    }
+
+    inline void AddGradientRect(const RenderListPtr &renderList, const Vec4 &rect, const Color &color1,
+                                const Color &color2, const GradientDirection direction)
+    {
+        return this->AddGradientRect(renderList, Vec2(rect.x, rect.y), Vec2(rect.x + rect.z, rect.y + rect.w), color1,
+                                     color2, direction);
+    }
+
+    inline void AddGradientRect(const Vec4 &rect, const Color &color1, const Color &color2,
+                                const GradientDirection direction)
+    {
+        return this->AddGradientRect(this->_renderList, Vec2(rect.x, rect.y), Vec2(rect.x + rect.z, rect.y + rect.w),
+                                     color1, color2, direction);
+    }
+
     inline void AddRectFilled(const RenderListPtr &renderList, const Vec2 &min, const Vec2 &max, const Color color)
     {
         float x1 = min.x;
@@ -905,6 +965,11 @@ class Renderer : public std::enable_shared_from_this<Renderer>
     inline void AddRectFilled(const Vec2 &min, const Vec2 &max, const Color color)
     {
         return this->AddRectFilled(this->_renderList, min, max, color);
+    }
+
+    inline void AddRectFilled(const RenderListPtr &renderList, const Vec4 &rect, const Color color)
+    {
+        return this->AddRectFilled(renderList, Vec2(rect.x, rect.y), Vec2(rect.x + rect.z, rect.y + rect.w), color);
     }
 
     inline void AddRectFilled(const Vec4 &rect, const Color color)
@@ -934,6 +999,12 @@ class Renderer : public std::enable_shared_from_this<Renderer>
     inline void AddRect(const Vec2 &min, const Vec2 &max, const Color color, float strokeWidth = 1.f)
     {
         return this->AddRect(this->_renderList, min, max, color, strokeWidth);
+    }
+
+    inline void AddRect(const RenderListPtr &renderList, const Vec4 &rect, const Color color, float strokeWidth = 1.f)
+    {
+        return this->AddRect(renderList, Vec2(rect.x, rect.y), Vec2(rect.x + rect.z, rect.y + rect.w), color,
+                             strokeWidth);
     }
 
     inline void AddRect(const Vec4 &rect, const Color color, float strokeWidth = 1.f)
@@ -1041,7 +1112,7 @@ class Renderer : public std::enable_shared_from_this<Renderer>
         this->_displaySize = {static_cast<float>(vp.Width), static_cast<float>(vp.Height)};
 
         detail::ThrowIfFailed(this->_d3dDevice->CreateVertexBuffer(
-            this->_maxVertices * sizeof(Vertex), D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, g_VertexDefinition,
+            this->_maxVertices * sizeof(Vertex), D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, g_vertexDefinition,
             D3DPOOL_DEFAULT, &this->_d3dVertexBuffer, nullptr));
 
         for (int i = 0; i < 2; ++i)
@@ -1086,7 +1157,7 @@ class Renderer : public std::enable_shared_from_this<Renderer>
             this->_d3dDevice->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
             this->_d3dDevice->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
 
-            this->_d3dDevice->SetFVF(g_VertexDefinition);
+            this->_d3dDevice->SetFVF(g_vertexDefinition);
             this->_d3dDevice->SetTexture(0, nullptr);
             this->_d3dDevice->SetStreamSource(0, this->_d3dVertexBuffer, 0, sizeof(Vertex));
             this->_d3dDevice->SetPixelShader(nullptr);
