@@ -561,7 +561,7 @@ class Font : public std::enable_shared_from_this<Font>
             if (c == L'\n')
             {
                 height += rowHeight;
-                width = max(width, rowWidth);
+                width = std::max(width, rowWidth);
                 rowWidth = 0.f;
             }
             else if (c >= L' ')
@@ -575,7 +575,7 @@ class Font : public std::enable_shared_from_this<Font>
             }
         }
 
-        width = max(width, rowWidth);
+        width = std::max(width, rowWidth);
         return Vec2(width, height);
     }
 

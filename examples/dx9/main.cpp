@@ -1,4 +1,8 @@
-﻿#include <windows.h>
+﻿#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
+#include <windows.h>
 #include <d3d9.h>
 #include <d3d9types.h>
 #include <d3d9caps.h>
