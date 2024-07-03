@@ -815,9 +815,9 @@ class Renderer : public std::enable_shared_from_this<Renderer>
         return fontHandle;
     }
 
-    inline void AddText(const RenderListPtr &renderList, const FontHandle fontId, const std::wstring &text, float x,
-                        float y, const Color color, uint32_t flags = FONT_FLAG_NONE,
-                        const Color outlineColor = Color(0, 0, 0), float outlineThickness = 2.0f)
+    inline void AddText(const RenderListPtr &renderList, const FontHandle fontId, const std::wstring &text, Vec2 pos,
+                        const Color color, uint32_t flags = FONT_FLAG_NONE, const Color outlineColor = Color(0, 0, 0),
+                        float outlineThickness = 2.0f)
     {
         auto font = this->_fonts.find(fontId);
         if (font == this->_fonts.end())
@@ -825,14 +825,14 @@ class Renderer : public std::enable_shared_from_this<Renderer>
             throw std::exception("AddText(): Font not found!");
         }
 
-        return font->second->RenderText(renderList, Vec2(x, y), text, color, flags, outlineColor, outlineThickness);
+        return font->second->RenderText(renderList, pos, text, color, flags, outlineColor, outlineThickness);
     }
 
-    inline void AddText(const FontHandle fontId, const std::wstring &text, float x, float y, const Color color,
+    inline void AddText(const FontHandle fontId, const std::wstring &text, Vec2 pos, const Color color,
                         uint32_t flags = FONT_FLAG_NONE, const Color outlineColor = Color(0, 0, 0),
                         float outlineThickness = 2.0f)
     {
-        return this->AddText(this->_renderList, fontId, text, x, y, color, flags, outlineColor, outlineThickness);
+        return this->AddText(this->_renderList, fontId, text, pos, color, flags, outlineColor, outlineThickness);
     }
 
     inline Vec2 CalculateTextExtent(const FontHandle fontId, const std::wstring &text)
@@ -871,6 +871,12 @@ class Renderer : public std::enable_shared_from_this<Renderer>
         return this->AddRectFilled(this->_renderList, min, max, color);
     }
 
+    inline void AddRectFilled(const Vec4 &rect, const Color color)
+    {
+        return this->AddRectFilled(this->_renderList, Vec2(rect.x, rect.y), Vec2(rect.x + rect.z, rect.y + rect.w),
+                                   color);
+    }
+
     inline void AddRect(const RenderListPtr &renderList, const Vec2 &min, const Vec2 &max, const Color color,
                         float strokeWidth = 1.f)
     {
@@ -892,6 +898,12 @@ class Renderer : public std::enable_shared_from_this<Renderer>
     inline void AddRect(const Vec2 &min, const Vec2 &max, const Color color, float strokeWidth = 1.f)
     {
         return this->AddRect(this->_renderList, min, max, color, strokeWidth);
+    }
+
+    inline void AddRect(const Vec4 &rect, const Color color, float strokeWidth = 1.f)
+    {
+        return this->AddRect(this->_renderList, Vec2(rect.x, rect.y), Vec2(rect.x + rect.z, rect.y + rect.w), color,
+                             strokeWidth);
     }
 
     inline void AddLine(const RenderListPtr &renderList, const Vec2 &v1, const Vec2 &v2, const Color color)
