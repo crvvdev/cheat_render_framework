@@ -7,6 +7,8 @@
 #include <array>
 #include <map>
 #include <algorithm>
+#include <locale>
+#include <codecvt>
 
 #include <d3d9.h>
 #include <DirectXMath.h>
@@ -15,7 +17,7 @@ namespace CheatRenderFramework
 {
 namespace detail
 {
-void ThrowIfFailed(const HRESULT hr)
+__forceinline void ThrowIfFailed(const HRESULT hr)
 {
     if (FAILED(hr))
     {
@@ -23,13 +25,21 @@ void ThrowIfFailed(const HRESULT hr)
     }
 }
 
-template <class T> void SafeRelease(T **ppT)
+template <class T> __forceinline void SafeRelease(T **ppT)
 {
     if (*ppT)
     {
         (*ppT)->Release();
         *ppT = NULL;
     }
+}
+
+__forceinline std::wstring ConvertToWString(const std::string &str)
+{
+    int sizeNeeded = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), static_cast<int>(str.length()), NULL, 0);
+    std::wstring wstrTo(sizeNeeded, 0);
+    MultiByteToWideChar(CP_UTF8, 0, str.c_str(), static_cast<int>(str.length()), &wstrTo[0], sizeNeeded);
+    return wstrTo;
 }
 } // namespace detail
 
@@ -829,6 +839,27 @@ class Renderer : public std::enable_shared_from_this<Renderer>
     }
 
     inline void AddText(const FontHandle fontId, const std::wstring &text, Vec2 pos, const Color color,
+                        uint32_t flags = FONT_FLAG_NONE, const Color outlineColor = Color(0, 0, 0),
+                        float outlineThickness = 2.0f)
+    {
+        return this->AddText(this->_renderList, fontId, text, pos, color, flags, outlineColor, outlineThickness);
+    }
+
+    inline void AddText(const RenderListPtr &renderList, const FontHandle fontId, const std::string &text, Vec2 pos,
+                        const Color color, uint32_t flags = FONT_FLAG_NONE, const Color outlineColor = Color(0, 0, 0),
+                        float outlineThickness = 2.0f)
+    {
+        auto font = this->_fonts.find(fontId);
+        if (font == this->_fonts.end())
+        {
+            throw std::exception("AddText(): Font not found!");
+        }
+
+        return font->second->RenderText(renderList, pos, detail::ConvertToWString(text), color, flags, outlineColor,
+                                        outlineThickness);
+    }
+
+    inline void AddText(const FontHandle fontId, const std::string &text, Vec2 pos, const Color color,
                         uint32_t flags = FONT_FLAG_NONE, const Color outlineColor = Color(0, 0, 0),
                         float outlineThickness = 2.0f)
     {
