@@ -877,6 +877,11 @@ class Renderer : public std::enable_shared_from_this<Renderer>
         return font->second->CalculateTextExtent(text);
     }
 
+    inline Vec2 CalculateTextExtent(const FontHandle fontId, const std::string &text)
+    {
+        return this->CalculateTextExtent(fontId, detail::ConvertToWString(text));
+    }
+
     inline void AddRectFilled(const RenderListPtr &renderList, const Vec2 &min, const Vec2 &max, const Color color)
     {
         float x1 = min.x;
