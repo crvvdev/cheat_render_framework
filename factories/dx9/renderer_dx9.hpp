@@ -282,11 +282,11 @@ class Font : public std::enable_shared_from_this<Font>
   public:
     using TextSegment = std::pair<std::wstring, Color>;
 
-    Font(const RenderListPtr &renderList, IDirect3DDevice9 *d3dDevice, const std::wstring &fontFamily, long fontHeigth,
+    Font(IDirect3DDevice9 *d3dDevice, const std::wstring &fontFamily, long fontHeigth,
          uint32_t fontFlags = FONT_FLAG_NONE)
-        : _renderList(renderList), _d3dDevice(d3dDevice), _fontFamily(fontFamily), _fontHeigth(fontHeigth),
-          _fontFlags(fontFlags), _charSpacing(0), _fontTexture(nullptr), _textScale(1.f), _textureWidth(1024),
-          _textureHeight(1024), _initialized(false)
+        : _d3dDevice(d3dDevice), _fontFamily(fontFamily), _fontHeigth(fontHeigth), _fontFlags(fontFlags),
+          _charSpacing(0), _fontTexture(nullptr), _textScale(1.f), _textureWidth(1024), _textureHeight(1024),
+          _initialized(false)
     {
         this->Initialize();
     }
@@ -405,8 +405,8 @@ class Font : public std::enable_shared_from_this<Font>
         this->_initialized = true;
     }
 
-    inline void RenderText(Vec2 pos, const std::wstring &text, const Color color, uint32_t flags,
-                           const Color outlineColor, float outlineThickness)
+    inline void RenderText(const RenderListPtr &renderList, Vec2 pos, const std::wstring &text, const Color color,
+                           uint32_t flags, const Color outlineColor, float outlineThickness)
     {
         size_t numToSkip = 0;
 
@@ -518,14 +518,14 @@ class Font : public std::enable_shared_from_this<Font>
 
                     if (flags & TEXT_FLAG_OUTLINE)
                     {
-                        this->_renderList->AddVertices(outlineV, D3DPT_TRIANGLELIST, this->_fontTexture);
+                        renderList->AddVertices(outlineV, D3DPT_TRIANGLELIST, this->_fontTexture);
                     }
                     else if (flags & TEXT_FLAG_DROPSHADOW)
                     {
-                        this->_renderList->AddVertices(shadowV, D3DPT_TRIANGLELIST, this->_fontTexture);
+                        renderList->AddVertices(shadowV, D3DPT_TRIANGLELIST, this->_fontTexture);
                     }
 
-                    this->_renderList->AddVertices(v, D3DPT_TRIANGLELIST, this->_fontTexture);
+                    renderList->AddVertices(v, D3DPT_TRIANGLELIST, this->_fontTexture);
                 }
 
                 pos.x += w - (2.f * this->_charSpacing);
@@ -733,7 +733,6 @@ class Font : public std::enable_shared_from_this<Font>
         return segments;
     }
 
-    RenderListPtr _renderList;
     IDirect3DDevice9 *_d3dDevice;
     IDirect3DTexture9 *_fontTexture;
     std::map<wchar_t, std::array<float, 4>> _charCoords;
@@ -809,17 +808,16 @@ class Renderer : public std::enable_shared_from_this<Renderer>
 
     inline FontHandle AddFont(const std::wstring &fontFamily, long fontHeigth, uint32_t fontFlags = FONT_FLAG_NONE)
     {
-        std::shared_ptr<Font> fontPtr =
-            std::make_shared<Font>(this->_renderList, this->_d3dDevice, fontFamily, fontHeigth, fontFlags);
+        std::shared_ptr<Font> fontPtr = std::make_shared<Font>(this->_d3dDevice, fontFamily, fontHeigth, fontFlags);
 
         const size_t fontHandle = this->_nextFontId++;
         this->_fonts[fontHandle] = fontPtr;
         return fontHandle;
     }
 
-    inline void AddText(const FontHandle fontId, const std::wstring &text, float x, float y, const Color color,
-                        uint32_t flags = FONT_FLAG_NONE, const Color outlineColor = Color(0, 0, 0),
-                        float outlineThickness = 2.0f)
+    inline void AddText(const RenderListPtr &renderList, const FontHandle fontId, const std::wstring &text, float x,
+                        float y, const Color color, uint32_t flags = FONT_FLAG_NONE,
+                        const Color outlineColor = Color(0, 0, 0), float outlineThickness = 2.0f)
     {
         auto font = this->_fonts.find(fontId);
         if (font == this->_fonts.end())
@@ -827,7 +825,25 @@ class Renderer : public std::enable_shared_from_this<Renderer>
             throw std::exception("AddText(): Font not found!");
         }
 
-        return font->second->RenderText(Vec2(x, y), text, color, flags, outlineColor, outlineThickness);
+        return font->second->RenderText(renderList, Vec2(x, y), text, color, flags, outlineColor, outlineThickness);
+    }
+
+    inline void AddText(const FontHandle fontId, const std::wstring &text, float x, float y, const Color color,
+                        uint32_t flags = FONT_FLAG_NONE, const Color outlineColor = Color(0, 0, 0),
+                        float outlineThickness = 2.0f)
+    {
+        return this->AddText(this->_renderList, fontId, text, x, y, color, flags, outlineColor, outlineThickness);
+    }
+
+    inline Vec2 CalculateTextExtent(const FontHandle fontId, const std::wstring &text)
+    {
+        auto font = this->_fonts.find(fontId);
+        if (font == this->_fonts.end())
+        {
+            throw std::exception("AddText(): Font not found!");
+        }
+
+        return font->second->CalculateTextExtent(text);
     }
 
     inline void AddRectFilled(const RenderListPtr &renderList, const Vec2 &min, const Vec2 &max, const Color color)
