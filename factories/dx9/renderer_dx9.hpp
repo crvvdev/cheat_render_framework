@@ -21,7 +21,7 @@ __forceinline void ThrowIfFailed(const HRESULT hr)
 {
     if (FAILED(hr))
     {
-        throw std::exception("HRESULT not successfull!");
+        throw std::runtime_error("DirectX call failed");
     }
 }
 
@@ -36,9 +36,24 @@ template <class T> __forceinline void SafeRelease(T **ppT)
 
 __forceinline std::wstring ConvertToWString(const std::string &str)
 {
+    if (str.empty())
+    {
+        return std::wstring();
+    }
+
     int sizeNeeded = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), static_cast<int>(str.length()), NULL, 0);
+    if (sizeNeeded <= 0)
+    {
+        throw std::runtime_error("MultiByteToWideChar failed");
+    }
+
     std::wstring wstrTo(sizeNeeded, 0);
-    MultiByteToWideChar(CP_UTF8, 0, str.c_str(), static_cast<int>(str.length()), &wstrTo[0], sizeNeeded);
+    int result = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), static_cast<int>(str.length()), &wstrTo[0], sizeNeeded);
+    if (result == 0)
+    {
+        throw std::runtime_error("MultiByteToWideChar failed");
+    }
+
     return wstrTo;
 }
 } // namespace detail
@@ -54,17 +69,20 @@ __forceinline int GetTopologyOrder(const D3DPRIMITIVETYPE topology)
 {
     switch (topology)
     {
+    default:
+        return 0;
+
     case D3DPT_POINTLIST:
         return 1;
+
     case D3DPT_LINELIST:
     case D3DPT_LINESTRIP:
         return 2;
+
     case D3DPT_TRIANGLELIST:
     case D3DPT_TRIANGLESTRIP:
     case D3DPT_TRIANGLEFAN:
         return 3;
-    default:
-        return 0;
     }
 }
 } // namespace util
@@ -84,6 +102,7 @@ using Vec2 = DirectX::XMFLOAT2;
 using Vec3 = DirectX::XMFLOAT3;
 using Vec4 = DirectX::XMFLOAT4;
 
+// Charset basic latin until latin extended B
 static constexpr wchar_t g_charRangeMin = 0x20;
 static constexpr wchar_t g_charRangeMax = 0x250;
 static constexpr ULONG g_vertexDefinition = D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1;
@@ -163,7 +182,7 @@ class Color
         return (aByte << 24) | (rByte << 16) | (gByte << 8) | bByte;
     }
 
-    uint32_t _color = 0xFF000000; // Default to opaque black
+    uint32_t _color = 0xFF000000;
 };
 
 struct Vertex
@@ -773,7 +792,7 @@ class Renderer : public std::enable_shared_from_this<Renderer>
     {
         if (!d3dDevice)
         {
-            throw std::exception("Renderer::ctor() d3dDevice is null!");
+            throw std::runtime_error("Renderer::ctor() d3dDevice is null!");
         }
 
         this->AcquireStateBlock();
@@ -832,41 +851,41 @@ class Renderer : public std::enable_shared_from_this<Renderer>
     }
 
     inline void AddText(const RenderListPtr &renderList, const FontHandle fontId, const std::wstring &text, Vec2 pos,
-                        const Color color, uint32_t flags = FONT_FLAG_NONE, const Color outlineColor = Color(0, 0, 0),
+                        const Color &color, uint32_t flags = FONT_FLAG_NONE, const Color &outlineColor = Color(0, 0, 0),
                         float outlineThickness = 2.0f)
     {
         auto font = this->_fonts.find(fontId);
         if (font == this->_fonts.end())
         {
-            throw std::exception("AddText(): Font not found!");
+            throw std::runtime_error("AddText(): Font not found!");
         }
 
         return font->second->RenderText(renderList, pos, text, color, flags, outlineColor, outlineThickness);
     }
 
-    inline void AddText(const FontHandle fontId, const std::wstring &text, Vec2 pos, const Color color,
-                        uint32_t flags = FONT_FLAG_NONE, const Color outlineColor = Color(0, 0, 0),
+    inline void AddText(const FontHandle fontId, const std::wstring &text, Vec2 pos, const Color &color,
+                        uint32_t flags = FONT_FLAG_NONE, const Color &outlineColor = Color(0, 0, 0),
                         float outlineThickness = 2.0f)
     {
         return this->AddText(this->_renderList, fontId, text, pos, color, flags, outlineColor, outlineThickness);
     }
 
     inline void AddText(const RenderListPtr &renderList, const FontHandle fontId, const std::string &text, Vec2 pos,
-                        const Color color, uint32_t flags = FONT_FLAG_NONE, const Color outlineColor = Color(0, 0, 0),
+                        const Color &color, uint32_t flags = FONT_FLAG_NONE, const Color &outlineColor = Color(0, 0, 0),
                         float outlineThickness = 2.0f)
     {
         auto font = this->_fonts.find(fontId);
         if (font == this->_fonts.end())
         {
-            throw std::exception("AddText(): Font not found!");
+            throw std::runtime_error("AddText(): Font not found!");
         }
 
         return font->second->RenderText(renderList, pos, detail::ConvertToWString(text), color, flags, outlineColor,
                                         outlineThickness);
     }
 
-    inline void AddText(const FontHandle fontId, const std::string &text, Vec2 pos, const Color color,
-                        uint32_t flags = FONT_FLAG_NONE, const Color outlineColor = Color(0, 0, 0),
+    inline void AddText(const FontHandle fontId, const std::string &text, Vec2 pos, const Color &color,
+                        uint32_t flags = FONT_FLAG_NONE, const Color &outlineColor = Color(0, 0, 0),
                         float outlineThickness = 2.0f)
     {
         return this->AddText(this->_renderList, fontId, text, pos, color, flags, outlineColor, outlineThickness);
@@ -877,7 +896,7 @@ class Renderer : public std::enable_shared_from_this<Renderer>
         auto font = this->_fonts.find(fontId);
         if (font == this->_fonts.end())
         {
-            throw std::exception("AddText(): Font not found!");
+            throw std::runtime_error("AddText(): Font not found!");
         }
 
         return font->second->CalculateTextExtent(text);
@@ -900,23 +919,23 @@ class Renderer : public std::enable_shared_from_this<Renderer>
 
         if (direction == GradientDirection::Horizontal)
         {
-            v[0] = {x1, y1, 0.5f, color1}; // Top-left
-            v[1] = {x2, y1, 0.5f, color1}; // Top-right
-            v[2] = {x1, y2, 0.5f, color2}; // Bottom-left
+            v[0] = {x1, y1, 0.5f, color1};
+            v[1] = {x2, y1, 0.5f, color1};
+            v[2] = {x1, y2, 0.5f, color2};
 
-            v[3] = {x2, y1, 0.5f, color1}; // Top-right
-            v[4] = {x2, y2, 0.5f, color2}; // Bottom-right
-            v[5] = {x1, y2, 0.5f, color2}; // Bottom-left
+            v[3] = {x2, y1, 0.5f, color1};
+            v[4] = {x2, y2, 0.5f, color2};
+            v[5] = {x1, y2, 0.5f, color2};
         }
         else
         {
-            v[0] = {x1, y1, 0.5f, color1}; // Top-left
-            v[1] = {x2, y1, 0.5f, color2}; // Top-right
-            v[2] = {x1, y2, 0.5f, color1}; // Bottom-left
+            v[0] = {x1, y1, 0.5f, color1};
+            v[1] = {x2, y1, 0.5f, color2};
+            v[2] = {x1, y2, 0.5f, color1};
 
-            v[3] = {x2, y1, 0.5f, color2}; // Top-right
-            v[4] = {x2, y2, 0.5f, color2}; // Bottom-right
-            v[5] = {x1, y2, 0.5f, color1}; // Bottom-left
+            v[3] = {x2, y1, 0.5f, color2};
+            v[4] = {x2, y2, 0.5f, color2};
+            v[5] = {x1, y2, 0.5f, color1};
         }
 
         renderList->AddVertices(v, 6, D3DPT_TRIANGLELIST);
@@ -942,43 +961,36 @@ class Renderer : public std::enable_shared_from_this<Renderer>
                                      color1, color2, direction);
     }
 
-    inline void AddRectFilled(const RenderListPtr &renderList, const Vec2 &min, const Vec2 &max, const Color color)
+    inline void AddRectFilled(const RenderListPtr &renderList, const Vec2 &min, const Vec2 &max, const Color &color)
     {
         float x1 = min.x;
         float y1 = min.y;
         float x2 = max.x;
         float y2 = max.y;
 
-        Vertex v[] = {
-            {x1, y1, color}, // Top-left vertex
-            {x2, y1, color}, // Top-right vertex
-            {x1, y2, color}, // Bottom-left vertex
-
-            {x2, y1, color}, // Top-right vertex
-            {x2, y2, color}, // Bottom-right vertex
-            {x1, y2, color}  // Bottom-left vertex
-        };
+        Vertex v[] = {{x1, y1, color}, {x2, y1, color}, {x1, y2, color},
+                      {x2, y1, color}, {x2, y2, color}, {x1, y2, color}};
 
         renderList->AddVertices(v, D3DPT_TRIANGLELIST);
     }
 
-    inline void AddRectFilled(const Vec2 &min, const Vec2 &max, const Color color)
+    inline void AddRectFilled(const Vec2 &min, const Vec2 &max, const Color &color)
     {
         return this->AddRectFilled(this->_renderList, min, max, color);
     }
 
-    inline void AddRectFilled(const RenderListPtr &renderList, const Vec4 &rect, const Color color)
+    inline void AddRectFilled(const RenderListPtr &renderList, const Vec4 &rect, const Color &color)
     {
         return this->AddRectFilled(renderList, Vec2(rect.x, rect.y), Vec2(rect.x + rect.z, rect.y + rect.w), color);
     }
 
-    inline void AddRectFilled(const Vec4 &rect, const Color color)
+    inline void AddRectFilled(const Vec4 &rect, const Color &color)
     {
         return this->AddRectFilled(this->_renderList, Vec2(rect.x, rect.y), Vec2(rect.x + rect.z, rect.y + rect.w),
                                    color);
     }
 
-    inline void AddRect(const RenderListPtr &renderList, const Vec2 &min, const Vec2 &max, const Color color,
+    inline void AddRect(const RenderListPtr &renderList, const Vec2 &min, const Vec2 &max, const Color &color,
                         float strokeWidth = 1.f)
     {
         Vec2 topLineMin = {min.x, min.y};
@@ -996,24 +1008,24 @@ class Renderer : public std::enable_shared_from_this<Renderer>
         this->AddRectFilled(renderList, rightLineMin, rightLineMax, color);
     }
 
-    inline void AddRect(const Vec2 &min, const Vec2 &max, const Color color, float strokeWidth = 1.f)
+    inline void AddRect(const Vec2 &min, const Vec2 &max, const Color &color, float strokeWidth = 1.f)
     {
         return this->AddRect(this->_renderList, min, max, color, strokeWidth);
     }
 
-    inline void AddRect(const RenderListPtr &renderList, const Vec4 &rect, const Color color, float strokeWidth = 1.f)
+    inline void AddRect(const RenderListPtr &renderList, const Vec4 &rect, const Color &color, float strokeWidth = 1.f)
     {
         return this->AddRect(renderList, Vec2(rect.x, rect.y), Vec2(rect.x + rect.z, rect.y + rect.w), color,
                              strokeWidth);
     }
 
-    inline void AddRect(const Vec4 &rect, const Color color, float strokeWidth = 1.f)
+    inline void AddRect(const Vec4 &rect, const Color &color, float strokeWidth = 1.f)
     {
         return this->AddRect(this->_renderList, Vec2(rect.x, rect.y), Vec2(rect.x + rect.z, rect.y + rect.w), color,
                              strokeWidth);
     }
 
-    inline void AddLine(const RenderListPtr &renderList, const Vec2 &v1, const Vec2 &v2, const Color color,
+    inline void AddLine(const RenderListPtr &renderList, const Vec2 &v1, const Vec2 &v2, const Color &color,
                         const float thickness = 1.f)
     {
         float dx = v2.x - v1.x;
@@ -1026,22 +1038,20 @@ class Renderer : public std::enable_shared_from_this<Renderer>
         float px = -dy * thickness * 0.5f;
         float py = dx * thickness * 0.5f;
 
-        Vertex v[] = {
-            {{v1.x + px, v1.y + py, 0.0f, 1.0f}, color}, // Bottom-left
-            {{v1.x - px, v1.y - py, 0.0f, 1.0f}, color}, // Top-left
-            {{v2.x + px, v2.y + py, 0.0f, 1.0f}, color}, // Bottom-right
-            {{v2.x - px, v2.y - py, 0.0f, 1.0f}, color}  // Top-right
-        };
+        Vertex v[] = {{{v1.x + px, v1.y + py, 0.0f, 1.0f}, color},
+                      {{v1.x - px, v1.y - py, 0.0f, 1.0f}, color},
+                      {{v2.x + px, v2.y + py, 0.0f, 1.0f}, color},
+                      {{v2.x - px, v2.y - py, 0.0f, 1.0f}, color}};
 
         renderList->AddVertices(v, D3DPT_TRIANGLESTRIP);
     }
 
-    inline void AddLine(const Vec2 &v1, const Vec2 &v2, const Color color, const float thickness = 1.f)
+    inline void AddLine(const Vec2 &v1, const Vec2 &v2, const Color &color, const float thickness = 1.f)
     {
         return this->AddLine(this->_renderList, v1, v2, color, thickness);
     }
 
-    inline void AddCircle(const RenderListPtr &renderList, const Vec2 &pos, float radius, const Color color,
+    inline void AddCircle(const RenderListPtr &renderList, const Vec2 &pos, float radius, const Color &color,
                           int segments = 64)
     {
         std::vector<Vertex> v(segments + 1);
@@ -1056,7 +1066,7 @@ class Renderer : public std::enable_shared_from_this<Renderer>
         renderList->AddVertices(v.data(), v.size(), D3DPT_LINESTRIP);
     }
 
-    inline void AddCircle(const Vec2 &pos, float radius, const Color color, int segments = 24)
+    inline void AddCircle(const Vec2 &pos, float radius, const Color &color, int segments = 24)
     {
         return this->AddCircle(this->_renderList, pos, radius, color, segments);
     }
@@ -1075,11 +1085,11 @@ class Renderer : public std::enable_shared_from_this<Renderer>
                 this->AcquireStateBlock();
             }
 
-            detail::ThrowIfFailed(_d3dVertexBuffer->Lock(0, 0, &data, D3DLOCK_DISCARD));
+            detail::ThrowIfFailed(this->_d3dVertexBuffer->Lock(0, 0, &data, D3DLOCK_DISCARD));
             {
                 memcpy(data, renderList->_vertices.data(), sizeof(Vertex) * numVertices);
             }
-            _d3dVertexBuffer->Unlock();
+            this->_d3dVertexBuffer->Unlock();
         }
 
         size_t pos = 0;
@@ -1100,8 +1110,8 @@ class Renderer : public std::enable_shared_from_this<Renderer>
                     primitiveCount -= (order - 1);
                 }
 
-                _d3dDevice->SetTexture(0, batch.d3dTexture);
-                _d3dDevice->DrawPrimitive(batch.topology, static_cast<uint32_t>(pos), primitiveCount);
+                this->_d3dDevice->SetTexture(0, batch.d3dTexture);
+                this->_d3dDevice->DrawPrimitive(batch.topology, static_cast<uint32_t>(pos), primitiveCount);
 
                 pos += batch.count;
             }
@@ -1111,7 +1121,7 @@ class Renderer : public std::enable_shared_from_this<Renderer>
     inline void Render()
     {
         this->Render(_renderList);
-        _renderList->Clear();
+        this->_renderList->Clear();
     }
 
     inline RenderListPtr CreateRenderList()
